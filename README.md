@@ -141,11 +141,11 @@ npm run build
 This plugin uses several Tabby APIs:
 
 - **ToolbarButtonProvider**: Adds toggle button to main toolbar
-- **SSHSidebarService**: Manages sidebar lifecycle and flexbox layout injection
+- **SSHSidebarService**: Manages sidebar lifecycle and layout integration
 - **ProfilesService**: Retrieves and manages SSH connection profiles
 - **ConfigService**: Persists user preferences (favorites, visibility, collapse state)
 
-The sidebar is implemented as a dynamically injected Angular component that modifies the app-root flexbox layout to create a true persistent sidebar panel.
+The sidebar is implemented as a dynamically injected Angular component. It is inserted into Tabby's `.window` element — the horizontal flex container that holds `profile-tree` and `.content.main` — so the sidebar participates in Tabby's own row layout and the terminal area simply shrinks to fit. `app-root` itself is a *column* flex container (title bar above, window below) and is deliberately left untouched.
 
 ## License
 
