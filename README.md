@@ -117,8 +117,21 @@ The plugin stores its configuration in Tabby's settings. Configuration is automa
 
 ## Requirements
 
-- Tabby Terminal v1.0.197 or later
+- Tabby Terminal v1.0.197 or later (tested against v1.0.235)
 - Node.js and npm for building
+
+## Troubleshooting
+
+### Installing from Settings → Plugins fails
+
+Versions up to 0.3.2 declared `peerDependencies` pinned to Angular 17.3.5 while
+Tabby's own packages ask for Angular 15. Tabby installs plugins with npm's
+programmatic API and cannot pass `--legacy-peer-deps`, so npm aborted with an
+`ERESOLVE` error and the install never completed.
+
+Those peer dependencies are gone as of 0.4.0 — every one of them is a webpack
+`external` that Tabby supplies at runtime, so the plugin never needed to pull
+them itself. Installing from the plugin manager works again; no flags required.
 
 ## Development
 
