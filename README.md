@@ -122,6 +122,22 @@ The plugin stores its configuration in Tabby's settings. Configuration is automa
 
 ## Troubleshooting
 
+### Duplicated profiles disappearing (fixed in 0.4.1)
+
+Up to 0.4.0, **Duplicate** in the sidebar context menu wrote the copy without an
+`id`. Tabby matches profiles by `id` nearly everywhere, so those copies didn't
+appear in Tabby's own profile selector — and because deletion filtered on
+`p.id !== target.id`, deleting one id-less copy removed **every** id-less
+profile at once.
+
+0.4.1 creates duplicates through Tabby's `newProfile()`, so each copy gets a
+proper `${type}:custom:${slug}:${uuid}` id, and deletion now removes exactly the
+profile you selected.
+
+If a config already contains id-less profiles from an earlier version, they are
+still listed and can now be deleted individually. To give them real ids, open
+each one in Tabby's profile editor (Settings → Profiles) and save it.
+
 ### Installing from Settings → Plugins fails
 
 Versions up to 0.3.2 declared `peerDependencies` pinned to Angular 17.3.5 while
