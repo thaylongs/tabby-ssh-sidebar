@@ -152,15 +152,26 @@ export class SSHSidebarService {
     /**
      * Let the main content area shrink next to the sidebar.
      *
-     * Tabby sizes `.content.main` with `width: 100%`, which in a row flex
+     * Tabby sizes `.content.main` with `width: 100vw`, which in a row flex
      * container refuses to give up space to a sibling. Overriding the flex
-     * basis (rather than forcing a width) keeps Tabby's own sizing intact
-     * while letting the terminal fill exactly the remaining width.
+     * basis (rather than forcing a width) lets the terminal fill exactly the
+     * remaining width.
+     *
+     * That `100vw` is also the only thing giving `.window` its width: `.window`
+     * has no width of its own and is not stretched by `app-root`, so once the
+     * override drops it, `.window` shrinks to the size of its content and
+     * leaves the rest of the window empty. `.window` is therefore pinned to
+     * the full width explicitly.
      */
     private injectLayoutCSS(): void {
         const style = document.createElement('style')
         style.id = 'ssh-sidebar-layout-css'
         style.textContent = `
+            app-root > .window {
+                width: 100% !important;
+                align-self: stretch !important;
+            }
+
             app-root .window > .content.main {
                 flex: 1 1 0 !important;
                 width: auto !important;

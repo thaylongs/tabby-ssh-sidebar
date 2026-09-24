@@ -117,10 +117,20 @@ The plugin stores its configuration in Tabby's settings. Configuration is automa
 
 ## Requirements
 
-- Tabby Terminal v1.0.197 or later (tested against v1.0.235)
+- Tabby Terminal v1.0.197 or later (tested against v1.0.236)
 - Node.js and npm for building
 
 ## Troubleshooting
+
+### Empty space to the right of the terminal (fixed in 0.4.2)
+
+Up to 0.4.1, opening the sidebar on Tabby 1.0.236 shrank the whole tab area
+(tab bar, terminal, settings) to the width of its content and left the rest of
+the window empty. The sidebar overrode the `width: 100vw` Tabby puts on the
+main content area, but that width was the only thing sizing Tabby's `.window`
+container, so `.window` collapsed to fit its content.
+
+0.4.2 pins `.window` to the full window width while the sidebar is open.
 
 ### Duplicated profiles disappearing (fixed in 0.4.1)
 
