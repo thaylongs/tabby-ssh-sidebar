@@ -1,0 +1,479 @@
+/*
+ * Palette. Everything is mixed from the theme's own text and background
+ * colors instead of Bootstrap's derived variables (--bs-secondary-color,
+ * --bs-tertiary-bg...): with near-black backgrounds Tabby derives those
+ * almost identical to the background, which left the sidebar as one flat
+ * blur. Mixing percentages of the foreground keeps the same contrast steps
+ * on any theme, light or dark.
+ */
+:host {
+    --sb-fg: var(--bs-body-color);
+    --sb-bg: var(--bs-body-bg);
+    --sb-accent: var(--bs-primary);
+    --sb-success: var(--bs-success);
+    --sb-danger: var(--bs-danger);
+
+    --sb-text: color-mix(in srgb, var(--sb-fg) 92%, var(--sb-bg));
+    --sb-muted: color-mix(in srgb, var(--sb-fg) 62%, var(--sb-bg));
+    --sb-faint: color-mix(in srgb, var(--sb-fg) 40%, var(--sb-bg));
+    --sb-panel: color-mix(in srgb, var(--sb-fg) 5%, var(--sb-bg));
+    --sb-header: color-mix(in srgb, var(--sb-fg) 9%, var(--sb-bg));
+    --sb-field: color-mix(in srgb, var(--sb-fg) 10%, var(--sb-bg));
+    --sb-hover: color-mix(in srgb, var(--sb-fg) 11%, var(--sb-bg));
+    --sb-border: color-mix(in srgb, var(--sb-fg) 18%, var(--sb-bg));
+    --sb-guide: color-mix(in srgb, var(--sb-fg) 16%, var(--sb-bg));
+    --sb-accent-soft: color-mix(in srgb, var(--sb-accent) 22%, var(--sb-panel));
+    --sb-folder: color-mix(in srgb, var(--bs-yellow, #e5c07b) 75%, var(--sb-fg));
+
+    display: block;
+    height: 100%;
+    width: 100%;
+    color: var(--sb-text);
+}
+
+.ssh-sidebar-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--sb-panel);
+    font-size: 13px;
+}
+
+/* Header */
+
+.ssh-sidebar-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 8px 10px 14px;
+    background: var(--sb-header);
+    border-bottom: 1px solid var(--sb-border);
+}
+
+/*
+ * On macOS the native window controls ("traffic lights") are drawn over
+ * the top-left of the window whenever the thin frame is used and there is
+ * no title bar. The sidebar is a sibling of Tabby's own profile-tree
+ * inside .window, so it sits in exactly that spot and the buttons would
+ * overlap the header. Mirror upstream's profile-tree.mac-inset rule --
+ * same offset, same conditions -- instead of hardcoding a pixel value.
+ */
+.ssh-sidebar-container.mac-inset .ssh-sidebar-header {
+    padding-top: calc(10px + var(--tabs-height));
+}
+
+.ssh-sidebar-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--sb-fg);
+    white-space: nowrap;
+}
+
+.ssh-sidebar-title span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/*
+ * Explicit sizes: Tabby's global styles size bare <svg> elements and
+ * override their width/height attributes.
+ */
+.ssh-sidebar-title svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--sb-accent);
+}
+
+.ssh-sidebar-actions svg {
+    width: 14px;
+    height: 14px;
+    display: block;
+}
+
+.ssh-sidebar-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 2px;
+}
+
+.ssh-sidebar-actions .btn {
+    padding: 4px 6px;
+    line-height: 1;
+    color: var(--sb-muted);
+    border-radius: 4px;
+}
+
+.ssh-sidebar-actions .btn:hover {
+    color: var(--sb-fg);
+    background: var(--sb-hover);
+}
+
+/* Count and sort */
+
+.ssh-sidebar-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px 4px 14px;
+    font-size: 12px;
+}
+
+.ssh-sidebar-count {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--sb-muted);
+    white-space: nowrap;
+}
+
+.ssh-sidebar-count i {
+    color: var(--sb-faint);
+}
+
+.active-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--sb-text);
+}
+
+.ssh-sidebar-sort {
+    display: flex;
+    flex-shrink: 0;
+    padding: 2px;
+    border-radius: 6px;
+    background: var(--sb-field);
+}
+
+.ssh-sidebar-sort .btn {
+    padding: 2px 8px;
+    font-size: 11px;
+    line-height: 1.5;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--sb-muted);
+}
+
+.ssh-sidebar-sort .btn:hover {
+    color: var(--sb-fg);
+}
+
+.ssh-sidebar-sort .btn.active {
+    background: var(--sb-accent);
+    color: #fff;
+}
+
+/* Search */
+
+.ssh-sidebar-search {
+    padding: 6px 10px 10px;
+    border-bottom: 1px solid var(--sb-border);
+}
+
+.ssh-sidebar-search .input-group-text,
+.ssh-sidebar-search input {
+    background: var(--sb-field);
+    border-color: var(--sb-border);
+    color: var(--sb-text);
+    font-size: 13px;
+}
+
+.ssh-sidebar-search .input-group-text {
+    border-right: none;
+    color: var(--sb-muted);
+}
+
+.ssh-sidebar-search input {
+    border-left: none;
+}
+
+.ssh-sidebar-search input::placeholder {
+    color: var(--sb-faint);
+}
+
+.ssh-sidebar-search input:focus {
+    box-shadow: none;
+    border-color: var(--sb-accent);
+}
+
+.ssh-sidebar-search .input-group:focus-within .input-group-text {
+    border-color: var(--sb-accent);
+}
+
+/* Tree */
+
+.ssh-sidebar-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 0 12px;
+}
+
+.tree-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px 0 8px;
+    cursor: pointer;
+    user-select: none;
+    border-left: 2px solid transparent;
+}
+
+.tree-row:hover {
+    background: var(--sb-hover);
+}
+
+/*
+ * One vertical guide line per nesting level, drawn under the chevron of
+ * each ancestor folder so the eye can follow a branch down.
+ */
+.tree-guides {
+    align-self: stretch;
+    flex-shrink: 0;
+    margin-right: -6px;
+    background: repeating-linear-gradient(
+        to right,
+        transparent 0 7px,
+        var(--sb-guide) 7px 8px,
+        transparent 8px 14px
+    );
+}
+
+.row-icon {
+    width: 16px;
+    flex-shrink: 0;
+    text-align: center;
+}
+
+/* Folders */
+
+.folder-row {
+    height: 30px;
+    font-weight: 600;
+    color: var(--sb-fg);
+}
+
+.folder-row.root:not(:first-child) {
+    margin-top: 4px;
+}
+
+.folder-chevron {
+    width: 14px;
+    flex-shrink: 0;
+    font-size: 9px;
+    color: var(--sb-faint);
+    text-align: center;
+}
+
+.folder-row:hover .folder-chevron {
+    color: var(--sb-muted);
+}
+
+.folder-icon.tinted {
+    color: var(--sb-folder);
+}
+
+.folder-name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.count {
+    flex-shrink: 0;
+    min-width: 20px;
+    padding: 1px 6px;
+    border-radius: 9px;
+    background: var(--sb-field);
+    color: var(--sb-muted);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.5;
+    text-align: center;
+}
+
+/* Connections */
+
+/*
+ * Vertical spacing lives on .profile-info rather than the row: the indent
+ * guides stretch over the row's content box only, and row padding would
+ * leave gaps in them between consecutive connections.
+ */
+.profile-row {
+    min-height: 38px;
+    align-items: stretch;
+}
+
+.profile-row > .row-icon,
+.profile-row > .active-dot,
+.profile-row > .row-action {
+    align-self: center;
+}
+
+/* Lines the icon up with those of sibling subfolders (chevron + gap) */
+.profile-icon {
+    color: var(--sb-muted);
+    margin-left: 20px;
+}
+
+.profile-info {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 0;
+    align-self: center;
+}
+
+.profile-name {
+    color: var(--sb-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.35;
+}
+
+.profile-desc {
+    color: var(--sb-muted);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.35;
+}
+
+.profile-row.active {
+    background: var(--sb-accent-soft);
+    border-left-color: var(--sb-accent);
+}
+
+.profile-row.active .profile-name {
+    color: var(--sb-fg);
+    font-weight: 600;
+}
+
+.active-dot {
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--sb-success);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--sb-success) 25%, transparent);
+}
+
+.row-action {
+    flex-shrink: 0;
+    padding: 3px 5px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--sb-muted);
+    font-size: 10px;
+    line-height: 1;
+    opacity: 0;
+}
+
+.tree-row:hover .row-action {
+    opacity: 1;
+}
+
+.row-action:hover {
+    background: var(--sb-accent);
+    color: #fff;
+}
+
+/* Empty state */
+
+.ssh-sidebar-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--sb-muted);
+}
+
+.ssh-sidebar-empty p {
+    margin: 0 0 8px 0;
+    font-weight: 500;
+    color: var(--sb-text);
+}
+
+.ssh-sidebar-empty small {
+    font-size: 12px;
+}
+
+/* Drag and drop */
+
+.folder-row.drop-target {
+    background: var(--sb-accent-soft);
+    box-shadow: inset 0 0 0 1px var(--sb-accent);
+}
+
+.ssh-sidebar-list.drop-root {
+    box-shadow: inset 0 0 0 1px var(--sb-accent);
+}
+
+.profile-row.dragging {
+    opacity: 0.45;
+}
+
+/* Context menu */
+
+.context-menu {
+    position: fixed;
+    background: var(--sb-header);
+    border: 1px solid var(--sb-border);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    z-index: 10000;
+    min-width: 210px;
+    padding: 4px;
+    font-size: 13px;
+    color: var(--sb-text);
+}
+
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.context-menu-item:hover {
+    background: var(--sb-hover);
+    color: var(--sb-fg);
+}
+
+.context-menu-item i {
+    width: 14px;
+    text-align: center;
+    color: var(--sb-muted);
+}
+
+.context-menu-item-danger,
+.context-menu-item-danger i {
+    color: var(--sb-danger);
+}
+
+.context-menu-item-danger:hover {
+    background: var(--sb-danger);
+}
+
+.context-menu-item-danger:hover,
+.context-menu-item-danger:hover i {
+    color: #fff;
+}
+
+.context-menu-divider {
+    height: 1px;
+    background: var(--sb-border);
+    margin: 4px 2px;
+}

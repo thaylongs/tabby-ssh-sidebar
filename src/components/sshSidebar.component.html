@@ -1,0 +1,292 @@
+<div class="ssh-sidebar-container" [class.collapsed]="collapsed" [class.mac-inset]="isMacInset">
+    <!-- Sidebar Header -->
+    <div class="ssh-sidebar-header">
+        <div class="ssh-sidebar-title" title="SSH Connections">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M0 2.5A1.5 1.5 0 0 1 1.5 1h13A1.5 1.5 0 0 1 16 2.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 13.5v-11zM1.5 2a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5h-13z"/>
+                <path d="M3 4.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm2 0h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1zm0 2h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1zm0 2h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1zm0 2h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1z"/>
+            </svg>
+            <span>SSH Connections</span>
+        </div>
+        <div class="ssh-sidebar-actions">
+            <button class="btn btn-link" (click)="newConnection()" title="New connection">
+                <i class="fas fa-fw fa-plus"></i>
+            </button>
+            <button class="btn btn-link" (click)="newFolder()" title="New folder">
+                <i class="fas fa-fw fa-folder-plus"></i>
+            </button>
+            <button class="btn btn-link" (click)="toggleCollapse()" title="Hide sidebar">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Connection Count & Sort Bar -->
+    <div class="ssh-sidebar-controls">
+        <div class="ssh-sidebar-count" [title]="getConnectionCountText()">
+            <span><i class="fas fa-fw fa-server"></i> {{ sshProfiles.length }}</span>
+            <span class="active-count" *ngIf="activeCount > 0">
+                <span class="active-dot"></span> {{ activeCount }}
+            </span>
+        </div>
+        <div class="ssh-sidebar-sort">
+            <button
+                class="btn btn-sm"
+                [class.active]="sortBy === 'name'"
+                (click)="setSortOrder('name')"
+                title="Sort by name">
+                Name
+            </button>
+            <button
+                class="btn btn-sm"
+                [class.active]="sortBy === 'host'"
+                (click)="setSortOrder('host')"
+                title="Sort by host">
+                Host
+            </button>
+            <button
+                class="btn btn-sm"
+                [class.active]="sortBy === 'recent'"
+                (click)="setSortOrder('recent')"
+                title="Sort by recent">
+                Recent
+            </button>
+        </div>
+    </div>
+
+    <!-- Search Box -->
+    <div class="ssh-sidebar-search">
+        <div class="input-group">
+            <span class="input-group-text">
+                <i class="fas fa-fw fa-search"></i>
+            </span>
+            <input
+                type="search"
+                class="form-control"
+                placeholder="Filter"
+                [(ngModel)]="filter"
+                (ngModelChange)="refreshFilteredProfiles()"
+            >
+        </div>
+    </div>
+
+    <!-- Connection tree -->
+    <div class="ssh-sidebar-list"
+         [class.drop-root]="dropTarget === 'root'"
+         (contextmenu)="onListContextMenu($event)"
+         (dragover)="onDragOver($event, null)"
+         (dragleave)="onListDragLeave($event)"
+         (drop)="onDrop($event, null)">
+        <ng-container *ngFor="let row of rows; trackBy: trackRow">
+            <!-- Folder -->
+            <div class="tree-row folder-row"
+                 *ngIf="row.folder as folder"
+                 [class.root]="row.depth === 0"
+                 [class.drop-target]="dropTarget === folder"
+                 [title]="folder.name"
+                 [draggable]="folder.kind === 'group'"
+                 (dragstart)="onDragStart($event, { folder: folder })"
+                 (dragend)="onDragEnd()"
+                 (dragover)="onDragOver($event, folder)"
+                 (drop)="onDrop($event, folder)"
+                 (contextmenu)="onFolderContextMenu($event, folder)"
+                 (click)="toggleFolder(folder)">
+                <span class="tree-guides" [style.width.px]="indent(row.depth)"></span>
+                <i class="fas fa-fw folder-chevron"
+                   [class.invisible]="!hasContents(folder)"
+                   [class.fa-chevron-right]="!row.expanded"
+                   [class.fa-chevron-down]="row.expanded"></i>
+                <profile-icon class="row-icon folder-icon"
+                    [class.tinted]="!folder.color"
+                    [icon]="getFolderIcon(folder, row.expanded && hasContents(folder))"
+                    [color]="folder.color">
+                </profile-icon>
+                <span class="folder-name">{{ folder.name }}</span>
+                <span class="active-dot"
+                      *ngIf="!row.expanded && hasActiveConnection(folder)"
+                      title="Contains active connections"></span>
+                <span class="count">{{ row.count }}</span>
+            </div>
+
+            <!-- Profile -->
+            <ng-container *ngIf="row.profile as profile">
+                <div class="tree-row profile-row"
+                     [class.active]="isActiveConnection(profile)"
+                     [class.dragging]="dragItem?.profile === profile"
+                     [title]="profile.name + (getDescription(profile) ? '\n' + getDescription(profile) : '')"
+                     [draggable]="!profile.isBuiltin"
+                     (dragstart)="onDragStart($event, { profile: profile })"
+                     (dragend)="onDragEnd()"
+                     (dragover)="onDragOver($event, row.parent)"
+                     (drop)="onDrop($event, row.parent)"
+                     (click)="launchProfile(profile)"
+                     (contextmenu)="onProfileContextMenu($event, profile)">
+                    <span class="tree-guides" [style.width.px]="indent(row.depth)"></span>
+                    <profile-icon class="row-icon profile-icon"
+                        [icon]="profile.icon || 'fas fa-server'"
+                        [color]="profile.color">
+                    </profile-icon>
+                    <div class="profile-info">
+                        <div class="profile-name">{{ profile.name }}</div>
+                        <div class="profile-desc" *ngIf="getDescription(profile)">
+                            {{ getDescription(profile) }}
+                        </div>
+                    </div>
+                    <span class="active-dot" *ngIf="isActiveConnection(profile)" title="Connected"></span>
+                    <button class="row-action"
+                            (click)="$event.stopPropagation(); launchProfile(profile)"
+                            title="Open connection">
+                        <i class="fas fa-fw fa-play"></i>
+                    </button>
+                </div>
+            </ng-container>
+        </ng-container>
+
+        <!-- Empty State -->
+        <div *ngIf="rows.length === 0" class="ssh-sidebar-empty">
+            <div *ngIf="sshProfiles.length === 0">
+                <p>No SSH connections found</p>
+                <small>Create SSH profiles in Tabby settings</small>
+            </div>
+            <div *ngIf="sshProfiles.length > 0">
+                <p>No matches found</p>
+                <small>Try a different search term</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div class="context-menu"
+         #contextMenu
+         *ngIf="contextMenuVisible"
+         [style.left.px]="contextMenuPosition.x"
+         [style.top.px]="contextMenuPosition.y">
+
+        <!-- Folder -->
+        <ng-container *ngIf="contextMenuKind === 'folder' && contextMenuFolder as folder">
+            <div class="context-menu-item"
+                 *ngIf="folder.kind !== 'favorites'"
+                 (click)="newConnection(folder)">
+                <i class="fas fa-fw fa-plus"></i>
+                <span>New Connection Here</span>
+            </div>
+            <div class="context-menu-item"
+                 *ngIf="folder.kind === 'group' || folder.kind === 'ungrouped'"
+                 (click)="newFolder(folder)">
+                <i class="fas fa-fw fa-folder-plus"></i>
+                <span>{{ folder.kind === 'group' ? 'New Subfolder' : 'New Folder' }}</span>
+            </div>
+            <div class="context-menu-item"
+                 *ngIf="folder.total > 0"
+                 (click)="openAllConnections(folder)">
+                <i class="fas fa-fw fa-play"></i>
+                <span>Open All Connections ({{ folder.total }})</span>
+            </div>
+            <ng-container *ngIf="folder.children.length > 0">
+                <div class="context-menu-divider"></div>
+                <div class="context-menu-item" (click)="setFoldersCollapsed([folder], false)">
+                    <i class="fas fa-fw fa-angles-down"></i>
+                    <span>Expand All</span>
+                </div>
+                <div class="context-menu-item" (click)="setFoldersCollapsed([folder], true)">
+                    <i class="fas fa-fw fa-angles-up"></i>
+                    <span>Collapse All</span>
+                </div>
+        </ng-container>
+        <ng-container *ngIf="folder.kind === 'group'">
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" (click)="renameFolder(folder)">
+                <i class="fas fa-fw fa-i-cursor"></i>
+                <span>Rename</span>
+            </div>
+            <div class="context-menu-item" (click)="editFolder(folder)">
+                <i class="fas fa-fw fa-sliders"></i>
+                <span>Edit Folder...</span>
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item context-menu-item-danger" (click)="deleteFolder(folder)">
+                <i class="fas fa-fw fa-trash-alt"></i>
+                <span>Delete Folder</span>
+            </div>
+        </ng-container>
+        </ng-container>
+
+        <!-- Empty area of the list -->
+        <ng-container *ngIf="contextMenuKind === 'root'">
+            <div class="context-menu-item" (click)="newConnection()">
+                <i class="fas fa-fw fa-plus"></i>
+                <span>New Connection</span>
+            </div>
+            <div class="context-menu-item" (click)="newFolder()">
+                <i class="fas fa-fw fa-folder-plus"></i>
+                <span>New Folder</span>
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" (click)="setFoldersCollapsed(rootFolders, false)">
+                <i class="fas fa-fw fa-angles-down"></i>
+                <span>Expand All</span>
+            </div>
+            <div class="context-menu-item" (click)="setFoldersCollapsed(rootFolders, true)">
+                <i class="fas fa-fw fa-angles-up"></i>
+                <span>Collapse All</span>
+            </div>
+        </ng-container>
+
+        <!-- Profile -->
+        <ng-container *ngIf="contextMenuKind === 'profile'">
+            <div class="context-menu-item" (click)="contextMenuLaunch()">
+                <i class="fas fa-fw fa-play"></i>
+                <span>Launch</span>
+            </div>
+            <div class="context-menu-item"
+                 *ngIf="contextMenuProfile && !contextMenuProfile.isBuiltin"
+                 (click)="contextMenuEdit()">
+                <i class="fas fa-fw fa-edit"></i>
+                <span>Edit</span>
+            </div>
+            <div class="context-menu-item" (click)="contextMenuDuplicate()">
+                <i class="fas fa-fw fa-copy"></i>
+                <span>Duplicate</span>
+            </div>
+            <div class="context-menu-item" (click)="contextMenuCopySSHCommand()">
+                <i class="fas fa-fw fa-terminal"></i>
+                <span>Copy SSH Command</span>
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item"
+                 *ngIf="contextMenuProfile && contextMenuProfile.id && !isProfileBlacklisted(contextMenuProfile)"
+                 (click)="contextMenuBlacklist()">
+                <i class="fas fa-fw fa-eye-slash"></i>
+                <span>Hide from Selector</span>
+            </div>
+            <div class="context-menu-item"
+                 *ngIf="contextMenuProfile && contextMenuProfile.id && isProfileBlacklisted(contextMenuProfile)"
+                 (click)="contextMenuUnblacklist()">
+                <i class="fas fa-fw fa-eye"></i>
+                <span>Show in Selector</span>
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item"
+                 *ngIf="contextMenuProfile && contextMenuProfile.id && !isProfilePinned(contextMenuProfile)"
+                 (click)="contextMenuPin()">
+                <i class="fas fa-fw fa-thumbtack"></i>
+                <span>Pin to Favorites</span>
+            </div>
+            <div class="context-menu-item"
+                 *ngIf="contextMenuProfile && contextMenuProfile.id && isProfilePinned(contextMenuProfile)"
+                 (click)="contextMenuUnpin()">
+                <i class="fas fa-fw fa-thumbtack" style="transform: rotate(45deg);"></i>
+                <span>Unpin from Favorites</span>
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item context-menu-item-danger"
+                 *ngIf="contextMenuProfile && !contextMenuProfile.isBuiltin"
+                 (click)="contextMenuDelete()">
+                <i class="fas fa-fw fa-trash-alt"></i>
+                <span>Delete</span>
+            </div>
+        </ng-container>
+    </div>
+</div>

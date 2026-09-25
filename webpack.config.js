@@ -19,6 +19,11 @@ module.exports = {
         use: 'ts-loader',
         exclude: /node_modules/,
       },
+      {
+        // Component templates and styles, inlined as strings
+        test: /\.(html|css)$/,
+        type: 'asset/source',
+      },
     ],
   },
   externals: [

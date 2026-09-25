@@ -1,7 +1,7 @@
 import { NgModule, Injectable } from '@angular/core'
 import { CommonModule } from '@angular/common'
 import { FormsModule } from '@angular/forms'
-import {
+import TabbyCoreModule, {
     ToolbarButtonProvider,
     ToolbarButton,
     ProfilesService,
@@ -149,6 +149,8 @@ export class SSHSidebarInitializer {
     imports: [
         CommonModule,
         FormsModule,
+        // Declares <profile-icon>, used for folder and connection icons
+        TabbyCoreModule,
     ],
     declarations: [
         SSHSidebarComponent,

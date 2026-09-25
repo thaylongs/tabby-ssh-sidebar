@@ -17,19 +17,33 @@ A Tabby Terminal plugin that adds a persistent sidebar panel showing all your SS
 ### Persistent Sidebar Panel
 - **Always-Visible Panel**: Fixed sidebar on the left side showing all SSH connections
 - **Live Connection Status**: Visual indicators show which connections are currently active
-- **Search Functionality**: Built-in search box to filter connections by name, host, or user
-- **Collapsible Groups**: Organize connections by groups with collapsible headers
+- **Search Functionality**: Built-in search box to filter connections by name, host, or user. Matches are shown inside their folders, opened along the way; folders without matches are hidden
+- **Nested Folders**: Mirrors Tabby's hierarchical profile groups (Tabby 1.0.236+) as an indented tree, any number of levels deep, with expand/collapse arrows
+- **Connection Counts**: Each folder shows how many connections it holds, subfolders included (or how many match, while searching)
 - **Favorites Support**: Pin your most-used connections to a dedicated "Favorites" group at the top
 - **Auto-Initialize**: Restores your previous sidebar state on startup
+- **Resizable**: Drag the sidebar's right edge to change its width (200–600px); double-click the edge to reset. The width is remembered
 
 ### Connection Management
 - **Right-Click Context Menu**: Access additional options for each connection
   - Connect to SSH server
-  - Edit connection settings (opens directly to profile editor)
+  - Edit connection settings (opens Tabby's profile editor)
   - Pin/Unpin from Favorites
   - Delete connection
-- **Profile Sorting**: Connections sorted alphabetically within groups
-- **Group Organization**: Maintains your existing Tabby profile groups
+- **Profile Sorting**: Sort by name, host, or recent use — applied within each folder
+- **Group Organization**: Works directly on your Tabby profile groups — every group is listed, even empty ones
+
+### Organizing Like MobaXterm
+- **Create From the Sidebar**: The **+** and **folder+** buttons in the header create a connection or a top-level folder. Right-clicking the empty area of the list offers the same, plus expand/collapse all
+- **Drag and Drop**: Drag connections between folders (drop on Favorites to pin, on Ungrouped or the empty area to remove from any folder). Drag folders into other folders, or to the top level. A collapsed folder opens when you hover over it while dragging
+- **Folder Context Menu**:
+  - New Connection Here — the profile editor opens with the folder already selected
+  - New Subfolder
+  - Open All Connections — every connection in the folder and its subfolders (asks first when there are more than 5)
+  - Expand All / Collapse All — the folder and everything below it
+  - Rename — subfolders follow, since Tabby links them to their parent by id
+  - Edit Folder... — Tabby's group editor: parent, icon, color and per-type defaults
+  - Delete Folder — when it isn't empty, choose between moving its contents to the parent folder or deleting everything in it
 
 ### Toolbar Integration
 - **Toggle Button**: Click to show/hide the sidebar panel
@@ -59,7 +73,7 @@ Then restart Tabby.
 1. Clone this repository
 2. Install dependencies:
    ```bash
-   npm install --legacy-peer-deps
+   npm install
    ```
 
 3. Build the plugin:
@@ -83,16 +97,17 @@ Then restart Tabby.
 3. **Search**: Use the search box to filter connections by name, host, or user
 4. **Connect**: Left-click any connection to open it in a new tab
 5. **Active Indicators**: Green dot shows which connections are currently open
-6. **Collapse Groups**: Click group headers to expand/collapse connection lists
+6. **Collapse Folders**: Click a folder to expand/collapse it. A green dot on a collapsed folder means a connection inside it is open
 7. **Pin Favorites**: Right-click connections and select "Pin to Favorites"
-8. **Edit Profiles**: Right-click and select "Edit" to open profile settings directly
-9. **Hide Sidebar**: Click the toolbar button to toggle visibility
+8. **Edit Profiles**: Right-click and select "Edit" to open Tabby's profile editor
+9. **Organize**: Create connections and folders from the header buttons or right-click menus, and drag things around to reorganize
+10. **Hide Sidebar**: Click the toolbar button to toggle visibility
 
 ### Context Menu Options
 
 Right-click any connection in the sidebar to access:
 - **Connect**: Open SSH connection in new tab
-- **Edit**: Open profile settings (navigates to settings tab and opens profile editor)
+- **Edit**: Open Tabby's profile editor
 - **Pin to Favorites** / **Unpin from Favorites**: Manage favorite connections
 - **Delete**: Remove the connection profile
 
@@ -100,7 +115,7 @@ Right-click any connection in the sidebar to access:
 
 1. Right-click any connection
 2. Select "Pin to Favorites"
-3. The connection will appear in the "⭐ Favorites" group at the top
+3. The connection will appear in the "Favorites" folder at the top (you can also drag it there)
 4. To unpin, right-click and select "Unpin from Favorites"
 
 ### Keyboard-Free Workflow
@@ -183,6 +198,17 @@ This plugin uses several Tabby APIs:
 - **SSHSidebarService**: Manages sidebar lifecycle and layout integration
 - **ProfilesService**: Retrieves and manages SSH connection profiles
 - **ConfigService**: Persists user preferences (favorites, visibility, collapse state)
+- **tabby-settings modals**: `EditProfileModalComponent` and `EditProfileGroupModalComponent`, the same editors Tabby's settings tab uses
+
+Source layout:
+
+| File | Role |
+|------|------|
+| `src/index.ts` | Plugin module, toolbar button, startup |
+| `src/services/sshSidebar.service.ts` | Inserts/removes the sidebar in Tabby's layout |
+| `src/services/profileActions.service.ts` | Every change to profiles and groups (create, edit, move, delete) and its dialogs |
+| `src/tree/profileTree.ts` | Plain functions: builds the folder tree, flattens it into rows, drag-and-drop rules |
+| `src/components/sshSidebar.component.{ts,html,css}` | The sidebar UI: filter, sort, menus, drag and drop |
 
 The sidebar is implemented as a dynamically injected Angular component. It is inserted into Tabby's `.window` element — the horizontal flex container that holds `profile-tree` and `.content.main` — so the sidebar participates in Tabby's own row layout and the terminal area simply shrinks to fit. `app-root` itself is a *column* flex container (title bar above, window below) and is deliberately left untouched.
 

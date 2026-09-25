@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, HostBinding, Inject, HostListener } from '@angular/core'
+import { Component, OnInit, OnDestroy, HostBinding, HostListener, ViewChild, ElementRef } from '@angular/core'
 import {
     ProfilesService,
     AppService,
@@ -6,7 +6,6 @@ import {
     TranslateService,
     Profile,
     PartialProfile,
-    ProfileProvider,
     BaseComponent,
     PlatformService,
     HostAppService,
@@ -16,14 +15,23 @@ import {
 import { SSHProfile } from 'tabby-ssh'
 import { Subject } from 'rxjs'
 import { takeUntil, debounceTime } from 'rxjs/operators'
-import deepClone from 'clone-deep'
-
-interface ProfileGroup {
-    id: string
-    name: string
-    profiles: PartialProfile<SSHProfile>[]
-    collapsed: boolean
-}
+import { ProfileActionsService } from '../services/profileActions.service'
+import {
+    DragItem,
+    Folder,
+    TreeRow,
+    UNGROUPED_ID,
+    buildFolderTree,
+    canDrop,
+    collectProfiles,
+    findFolder,
+    flattenTree,
+    getPathIds,
+    loadCollapsedState,
+    saveCollapsedState,
+} from '../tree/profileTree'
+import template from './sshSidebar.component.html'
+import styles from './sshSidebar.component.css'
 
 interface ContextMenuPosition {
     x: number
@@ -31,482 +39,45 @@ interface ContextMenuPosition {
 }
 
 /**
- * Persistent sidebar component that displays SSH connections
- * UI adapted from Tabby's ProfilesSettingsTab component
+ * Persistent sidebar listing SSH connections in Tabby's (nested) profile
+ * groups, with MobaXterm-style management: connections and folders are
+ * created, moved and edited right from the tree.
+ *
+ * The tree itself is built by `tree/profileTree`, and every change to
+ * profiles and groups goes through `ProfileActionsService`; this component
+ * only holds the UI state (filter, sort, menus, drag and drop).
  */
 @Component({
     selector: 'ssh-sidebar',
-    template: `
-        <div class="ssh-sidebar-container" [class.collapsed]="collapsed" [class.mac-inset]="isMacInset">
-            <!-- Sidebar Header -->
-            <div class="ssh-sidebar-header">
-                <div class="ssh-sidebar-title">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M0 2.5A1.5 1.5 0 0 1 1.5 1h13A1.5 1.5 0 0 1 16 2.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 13.5v-11zM1.5 2a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5h-13z"/>
-                        <path d="M3 4.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm2 0h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1zm0 2h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1zm0 2h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1zm0 2h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1z"/>
-                    </svg>
-                    <span>SSH Connections</span>
-                </div>
-                <div class="ssh-sidebar-actions">
-                    <button class="btn btn-link" (click)="toggleCollapse()" title="Hide sidebar">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Connection Count & Sort Bar -->
-            <div class="ssh-sidebar-controls">
-                <div class="ssh-sidebar-count">
-                    {{ getConnectionCountText() }}
-                </div>
-                <div class="ssh-sidebar-sort">
-                    <button
-                        class="btn btn-sm"
-                        [class.active]="sortBy === 'name'"
-                        (click)="setSortOrder('name')"
-                        title="Sort by name">
-                        Name
-                    </button>
-                    <button
-                        class="btn btn-sm"
-                        [class.active]="sortBy === 'host'"
-                        (click)="setSortOrder('host')"
-                        title="Sort by host">
-                        Host
-                    </button>
-                    <button
-                        class="btn btn-sm"
-                        [class.active]="sortBy === 'recent'"
-                        (click)="setSortOrder('recent')"
-                        title="Sort by recent">
-                        Recent
-                    </button>
-                </div>
-            </div>
-
-            <!-- Search Box -->
-            <div class="ssh-sidebar-search">
-                <div class="input-group">
-                    <span class="input-group-text">
-                        <i class="fas fa-fw fa-search"></i>
-                    </span>
-                    <input
-                        type="search"
-                        class="form-control"
-                        placeholder="Filter"
-                        [(ngModel)]="filter"
-                        (input)="refreshFilteredProfiles()"
-                    >
-                </div>
-            </div>
-
-            <!-- Profiles List (Tabby-style) -->
-            <div class="ssh-sidebar-list list-group">
-                <ng-container *ngFor="let group of profileGroups">
-                    <ng-container *ngIf="isGroupVisible(group)">
-                        <!-- Group Header -->
-                        <div class="list-group-item list-group-item-action d-flex align-items-center group-header"
-                             (click)="toggleGroupCollapse(group)">
-                            <i class="fa fa-fw fa-chevron-right" *ngIf="group.collapsed && group.profiles.length > 0"></i>
-                            <i class="fa fa-fw fa-chevron-down" *ngIf="!group.collapsed && group.profiles.length > 0"></i>
-                            <span class="ms-2 me-auto">{{ group.name }}</span>
-                            <span class="badge bg-secondary">{{ group.profiles.length }}</span>
-                        </div>
-
-                        <!-- Group Profiles -->
-                        <ng-container *ngIf="!group.collapsed">
-                            <ng-container *ngFor="let profile of group.profiles">
-                                <div class="list-group-item profile-item d-flex align-items-center"
-                                     *ngIf="isProfileVisible(profile)"
-                                     [class.active]="isActiveConnection(profile)"
-                                     (click)="launchProfile(profile)"
-                                     (contextmenu)="onProfileContextMenu($event, profile)">
-
-                                    <!-- Profile Icon -->
-                                    <profile-icon
-                                        [icon]="profile.icon"
-                                        [color]="profile.color">
-                                    </profile-icon>
-
-                                    <!-- Profile Name & Description -->
-                                    <div class="profile-info">
-                                        <div class="profile-name">{{ profile.name }}</div>
-                                        <div class="profile-desc text-muted" *ngIf="getDescription(profile)">
-                                            {{ getDescription(profile) }}
-                                        </div>
-                                    </div>
-
-                                    <div class="me-auto"></div>
-
-                                    <!-- Launch Button -->
-                                    <button class="btn btn-link btn-sm hover-reveal ms-1"
-                                            (click)="$event.stopPropagation(); launchProfile(profile)"
-                                            title="Launch connection">
-                                        <i class="fas fa-play"></i>
-                                    </button>
-
-                                    <!-- Type Badge -->
-                                    <span class="ms-1 badge" [ngClass]="'text-bg-' + getTypeColorClass(profile)">
-                                        {{ getTypeLabel(profile) }}
-                                    </span>
-                                </div>
-                            </ng-container>
-                        </ng-container>
-                    </ng-container>
-                </ng-container>
-
-                <!-- Empty State -->
-                <div *ngIf="!hasVisibleProfiles()" class="ssh-sidebar-empty">
-                    <div *ngIf="sshProfiles.length === 0">
-                        <p>No SSH connections found</p>
-                        <small>Create SSH profiles in Tabby settings</small>
-                    </div>
-                    <div *ngIf="sshProfiles.length > 0">
-                        <p>No matches found</p>
-                        <small>Try a different search term</small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Context Menu -->
-            <div class="context-menu"
-                 *ngIf="contextMenuVisible"
-                 [style.left.px]="contextMenuPosition.x"
-                 [style.top.px]="contextMenuPosition.y">
-                <div class="context-menu-item" (click)="contextMenuLaunch()">
-                    <i class="fas fa-fw fa-play"></i>
-                    <span>Launch</span>
-                </div>
-                <div class="context-menu-item" (click)="contextMenuEdit()">
-                    <i class="fas fa-fw fa-edit"></i>
-                    <span>Edit</span>
-                </div>
-                <div class="context-menu-item" (click)="contextMenuDuplicate()">
-                    <i class="fas fa-fw fa-copy"></i>
-                    <span>Duplicate</span>
-                </div>
-                <div class="context-menu-item" (click)="contextMenuCopySSHCommand()">
-                    <i class="fas fa-fw fa-terminal"></i>
-                    <span>Copy SSH Command</span>
-                </div>
-                <div class="context-menu-divider"></div>
-                <div class="context-menu-item"
-                     *ngIf="contextMenuProfile && contextMenuProfile.id && !isProfileBlacklisted(contextMenuProfile)"
-                     (click)="contextMenuBlacklist()">
-                    <i class="fas fa-fw fa-eye-slash"></i>
-                    <span>Hide from Selector</span>
-                </div>
-                <div class="context-menu-item"
-                     *ngIf="contextMenuProfile && contextMenuProfile.id && isProfileBlacklisted(contextMenuProfile)"
-                     (click)="contextMenuUnblacklist()">
-                    <i class="fas fa-fw fa-eye"></i>
-                    <span>Show in Selector</span>
-                </div>
-                <div class="context-menu-divider"></div>
-                <div class="context-menu-item"
-                     *ngIf="contextMenuProfile && contextMenuProfile.id && !isProfilePinned(contextMenuProfile)"
-                     (click)="contextMenuPin()">
-                    <i class="fas fa-fw fa-thumbtack"></i>
-                    <span>Pin to Favorites</span>
-                </div>
-                <div class="context-menu-item"
-                     *ngIf="contextMenuProfile && contextMenuProfile.id && isProfilePinned(contextMenuProfile)"
-                     (click)="contextMenuUnpin()">
-                    <i class="fas fa-fw fa-thumbtack" style="transform: rotate(45deg);"></i>
-                    <span>Unpin from Favorites</span>
-                </div>
-                <div class="context-menu-divider"></div>
-                <div class="context-menu-item context-menu-item-danger"
-                     *ngIf="contextMenuProfile && !contextMenuProfile.isBuiltin"
-                     (click)="contextMenuDelete()">
-                    <i class="fas fa-fw fa-trash-alt"></i>
-                    <span>Delete</span>
-                </div>
-            </div>
-        </div>
-    `,
-    styles: [`
-        :host {
-            display: block;
-            height: 100%;
-            width: 100%;
-        }
-
-        .ssh-sidebar-container {
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            background: var(--bs-body-bg);
-            transition: all 0.3s ease;
-        }
-
-        .ssh-sidebar-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--bs-border-color);
-            background: var(--bs-tertiary-bg);
-        }
-
-        /*
-         * On macOS the native window controls ("traffic lights") are drawn over
-         * the top-left of the window whenever the thin frame is used and there is
-         * no title bar. The sidebar is a sibling of Tabby's own profile-tree
-         * inside .window, so it sits in exactly that spot and the buttons would
-         * overlap the header. Mirror upstream's profile-tree.mac-inset rule --
-         * same offset, same conditions -- instead of hardcoding a pixel value.
-         */
-        .ssh-sidebar-container.mac-inset .ssh-sidebar-header {
-            padding-top: calc(12px + var(--tabs-height));
-        }
-
-        .ssh-sidebar-title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 600;
-            font-size: 14px;
-        }
-
-        .ssh-sidebar-actions .btn {
-            padding: 4px;
-            opacity: 0.6;
-        }
-
-        .ssh-sidebar-actions .btn:hover {
-            opacity: 1;
-        }
-
-        .ssh-sidebar-controls {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 12px;
-            border-bottom: 1px solid var(--bs-border-color);
-            background: var(--bs-body-bg);
-            font-size: 12px;
-        }
-
-        .ssh-sidebar-count {
-            color: var(--bs-secondary-color);
-            font-weight: 500;
-        }
-
-        .ssh-sidebar-sort {
-            display: flex;
-            gap: 4px;
-        }
-
-        .ssh-sidebar-sort .btn {
-            padding: 2px 8px;
-            font-size: 11px;
-            border: 1px solid var(--bs-border-color);
-            background: var(--bs-body-bg);
-            color: var(--bs-body-color);
-            opacity: 0.6;
-            transition: all 0.2s ease;
-        }
-
-        .ssh-sidebar-sort .btn:hover {
-            opacity: 0.9;
-            background: var(--bs-tertiary-bg);
-        }
-
-        .ssh-sidebar-sort .btn.active {
-            opacity: 1;
-            background: var(--bs-primary);
-            color: white;
-            border-color: var(--bs-primary);
-        }
-
-        .ssh-sidebar-search {
-            padding: 12px;
-            border-bottom: 1px solid var(--bs-border-color);
-        }
-
-        .ssh-sidebar-search .input-group-text {
-            background: var(--bs-tertiary-bg);
-            border-right: none;
-            color: var(--bs-secondary-color);
-        }
-
-        .ssh-sidebar-search input {
-            background: var(--bs-tertiary-bg);
-            border-left: none;
-            color: var(--bs-body-color);
-        }
-
-        .ssh-sidebar-list {
-            flex: 1;
-            overflow-y: auto;
-            padding: 0;
-        }
-
-        .ssh-sidebar-empty {
-            padding: 40px 20px;
-            text-align: center;
-            color: var(--bs-secondary-color);
-        }
-
-        .ssh-sidebar-empty p {
-            margin: 0 0 8px 0;
-            font-weight: 500;
-        }
-
-        .ssh-sidebar-empty small {
-            font-size: 12px;
-        }
-
-        /* Group Header Styling */
-        .group-header {
-            background: var(--bs-tertiary-bg);
-            font-weight: 600;
-            font-size: 13px;
-            cursor: pointer;
-            padding: 10px 16px;
-        }
-
-        .group-header:hover {
-            background: var(--bs-secondary-bg);
-        }
-
-        /* Profile Item Styling */
-        .profile-item {
-            padding: 10px 12px 10px 12px;
-            cursor: pointer;
-            border-left: 3px solid transparent;
-            transition: all 0.2s ease;
-        }
-
-        .profile-item:hover {
-            background: var(--bs-tertiary-bg);
-        }
-
-        .profile-item.active {
-            background: var(--bs-primary-bg-subtle);
-            border-left-color: var(--bs-primary);
-        }
-
-        /* Profile Info */
-        .profile-info {
-            flex: 1;
-            min-width: 0;
-            margin-left: 8px;
-        }
-
-        .profile-name {
-            font-weight: 500;
-            font-size: 13px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .profile-desc {
-            font-size: 11px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        /* Profile Icon Sizing */
-        profile-icon {
-            width: 1.25rem;
-            flex-shrink: 0;
-        }
-
-        /* Hover Reveal Buttons */
-        .hover-reveal {
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-
-        .profile-item:hover .hover-reveal {
-            opacity: 1;
-        }
-
-        /* Badge Styling */
-        .badge {
-            font-size: 9px;
-            padding: 2px 6px;
-        }
-
-        /* Button Styling */
-        .btn-link {
-            color: var(--bs-body-color);
-            text-decoration: none;
-        }
-
-        .btn-link:hover {
-            color: var(--bs-primary);
-        }
-
-        /* Context Menu Styling */
-        .context-menu {
-            position: fixed;
-            background: var(--bs-body-bg);
-            border: 1px solid var(--bs-border-color);
-            border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            z-index: 10000;
-            min-width: 200px;
-            padding: 4px 0;
-            font-size: 13px;
-        }
-
-        .context-menu-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 16px;
-            cursor: pointer;
-            transition: background 0.2s ease;
-            color: var(--bs-body-color);
-        }
-
-        .context-menu-item:hover {
-            background: var(--bs-tertiary-bg);
-        }
-
-        .context-menu-item-danger {
-            color: var(--bs-danger);
-        }
-
-        .context-menu-item-danger:hover {
-            background: var(--bs-danger);
-            color: white;
-        }
-
-        .context-menu-item i {
-            width: 14px;
-            text-align: center;
-        }
-
-        .context-menu-divider {
-            height: 1px;
-            background: var(--bs-border-color);
-            margin: 4px 0;
-        }
-    `]
+    template,
+    styles: [styles],
 })
 export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDestroy {
     @HostBinding('class.ssh-sidebar') hostClass = true
 
     sshProfiles: PartialProfile<SSHProfile>[] = []
-    profileGroups: ProfileGroup[] = []
+    /** Top-level folders: Favorites, Ungrouped, then Tabby's root groups */
+    rootFolders: Folder[] = []
+    /** The tree flattened into the lines currently on screen */
+    rows: TreeRow[] = []
     filter = ''
     collapsed = false
-    configGroups: any[] = []
     sortBy: 'name' | 'host' | 'recent' = 'name'
     pinnedProfiles: string[] = [] // Array of profile IDs
 
     // Context menu state
     contextMenuVisible = false
     contextMenuPosition: ContextMenuPosition = { x: 0, y: 0 }
+    contextMenuKind: 'profile' | 'folder' | 'root' = 'profile'
     contextMenuProfile: PartialProfile<SSHProfile> | null = null
+    contextMenuFolder: Folder | null = null
+    @ViewChild('contextMenu') contextMenuElement?: ElementRef<HTMLElement>
+
+    // Drag and drop state. `dropTarget` is the folder under the pointer, or
+    // 'root' for the empty area of the list.
+    dragItem: DragItem | null = null
+    dropTarget: Folder | 'root' | null = null
+    private dragExpandTimer: any = null
 
     private destroy$ = new Subject<void>()
     public sidebarService: any = null  // Will be injected by the service
@@ -519,7 +90,7 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
         private platform: PlatformService,
         private hostApp: HostAppService,
         private hostWindow: HostWindowService,
-        @Inject(ProfileProvider) private profileProviders: ProfileProvider<Profile>[],
+        private actions: ProfileActionsService,
     ) {
         super()
     }
@@ -545,28 +116,18 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
     }
 
     async ngOnInit(): Promise<void> {
-        // Load config groups
-        this.configGroups = this.config.store.groups || []
-
-        // Load pinned profiles
         this.loadPinnedProfiles()
 
         await this.refreshProfiles()
-        await this.refreshProfileGroups()
 
-        // Watch for config changes (profiles added/deleted/modified)
-        // Config changes include profile edits, additions, and deletions
-        // Debounce to avoid multiple rapid refreshes
+        // Watch for config changes (profiles and groups added/deleted/modified),
+        // debounced to avoid multiple rapid refreshes
         this.config.changed$
             .pipe(
                 takeUntil(this.destroy$),
                 debounceTime(300)
             )
-            .subscribe(async () => {
-                this.configGroups = this.config.store.groups || []
-                await this.refreshProfiles()
-                await this.refreshProfileGroups()
-            })
+            .subscribe(() => this.refreshProfiles())
 
         // Watch for tab changes to update active connection indicators
         this.app.tabsChanged$
@@ -581,6 +142,7 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
     }
 
     ngOnDestroy(): void {
+        clearTimeout(this.dragExpandTimer)
         this.destroy$.next()
         this.destroy$.complete()
     }
@@ -609,81 +171,20 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
         await this.refreshProfileGroups()
     }
 
+    /** Rebuilds the folder tree from `sshProfiles` and the config's groups */
     async refreshProfileGroups(): Promise<void> {
-        const profileGroupCollapsed = JSON.parse(window.localStorage.profileGroupCollapsed ?? '{}')
-
-        // Sort profiles first
         await this.sortProfiles()
-
-        // Group profiles by their group property
-        const grouped: { [key: string]: PartialProfile<SSHProfile>[] } = {}
-
-        for (const profile of this.sshProfiles) {
-            const groupId = profile.group || 'ungrouped'
-            if (!grouped[groupId]) {
-                grouped[groupId] = []
-            }
-            grouped[groupId].push(profile)
-        }
-
-        // Convert to ProfileGroup array
-        this.profileGroups = Object.entries(grouped).map(([groupId, profiles]) => {
-            let groupName = groupId
-            if (groupId !== 'ungrouped') {
-                // Try to resolve group ID to name from config
-                const configGroup = this.configGroups.find(g => g.id === groupId)
-                if (configGroup) {
-                    groupName = configGroup.name
-                }
-            } else {
-                groupName = 'Ungrouped'
-            }
-
-            return {
-                id: groupId,
-                name: groupName,
-                profiles,
-                collapsed: profileGroupCollapsed[groupId] ?? false,
-            }
-        })
-
-        // Add Favorites group at the top if there are pinned profiles
-        if (this.pinnedProfiles.length > 0) {
-            const pinnedProfileObjects = this.sshProfiles.filter(p =>
-                p.id && this.pinnedProfiles.includes(p.id)
-            )
-
-            if (pinnedProfileObjects.length > 0) {
-                // Remove pinned profiles from other groups
-                this.profileGroups.forEach(group => {
-                    group.profiles = group.profiles.filter(p =>
-                        !p.id || !this.pinnedProfiles.includes(p.id)
-                    )
-                })
-
-                // Add Favorites group at the beginning
-                this.profileGroups.unshift({
-                    id: 'favorites',
-                    name: '⭐ Favorites',
-                    profiles: pinnedProfileObjects,
-                    collapsed: profileGroupCollapsed['favorites'] ?? false,
-                })
-            }
-        }
-
-        // Remove empty groups
-        this.profileGroups = this.profileGroups.filter(group =>
-            group.profiles.length > 0
+        this.rootFolders = buildFolderTree(
+            this.sshProfiles,
+            this.actions.groups,
+            p => this.isProfilePinned(p),
+            loadCollapsedState(),
         )
+        this.rebuildRows()
+    }
 
-        // Sort groups: favorites first, ungrouped second, then alphabetically
-        this.profileGroups.sort((a, b) => {
-            if (a.id === 'favorites') return -1
-            if (b.id === 'favorites') return 1
-            if (a.id === 'ungrouped') return -1
-            if (b.id === 'ungrouped') return 1
-            return a.name.localeCompare(b.name)
-        })
+    rebuildRows(): void {
+        this.rows = flattenTree(this.rootFolders, this.filter ? p => this.isProfileVisible(p) : undefined)
     }
 
     async sortProfiles(): Promise<void> {
@@ -733,11 +234,7 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
     }
 
     refreshFilteredProfiles(): void {
-        // Filter is applied in the template via isProfileVisible
-    }
-
-    isGroupVisible(group: ProfileGroup): boolean {
-        return !this.filter || group.profiles.some(x => this.isProfileVisible(x))
+        this.rebuildRows()
     }
 
     isProfileVisible(profile: PartialProfile<Profile>): boolean {
@@ -746,10 +243,6 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
         }
         const searchText = (profile.name + '$' + (this.getDescription(profile) ?? '')).toLowerCase()
         return searchText.includes(this.filter.toLowerCase())
-    }
-
-    hasVisibleProfiles(): boolean {
-        return this.profileGroups.some(g => this.isGroupVisible(g))
     }
 
     getDescription(profile: PartialProfile<Profile>): string | null {
@@ -769,31 +262,38 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
         return null
     }
 
-    getTypeLabel(profile: PartialProfile<Profile>): string {
-        const provider = this.profiles.providerForProfile(profile)
-        const name = provider?.name
-        if (name === 'Local terminal') {
-            return ''
-        }
-        return name ? this.translate.instant(name) : this.translate.instant('Unknown')
-    }
-
-    getTypeColorClass(profile: PartialProfile<Profile>): string {
-        const provider = this.profiles.providerForProfile(profile)
-        return {
-            ssh: 'secondary',
-            serial: 'success',
-            telnet: 'info',
-            'split-layout': 'primary',
-        }[provider?.id ?? ''] ?? 'warning'
-    }
-
-    toggleGroupCollapse(group: ProfileGroup): void {
-        if (group.profiles.length === 0) {
+    toggleFolder(folder: Folder): void {
+        // While searching every folder on a match's path is forced open, so
+        // flipping the saved state would have no visible effect.
+        if (this.filter) {
             return
         }
-        group.collapsed = !group.collapsed
-        this.saveProfileGroupCollapse(group)
+        folder.collapsed = !folder.collapsed
+        saveCollapsedState({ [folder.id]: folder.collapsed })
+        this.rebuildRows()
+    }
+
+    /** Width of the indent guides in front of a row */
+    indent(depth: number): number {
+        return depth * 14
+    }
+
+    trackRow(_index: number, row: TreeRow): string {
+        return row.key
+    }
+
+    getFolderIcon(folder: Folder, expanded: boolean): string {
+        return folder.icon ?? (expanded ? 'far fa-folder-open' : 'far fa-folder')
+    }
+
+    hasContents(folder: Folder): boolean {
+        return folder.profiles.length > 0 || folder.children.length > 0
+    }
+
+    /** Whether any profile in the folder or its subfolders has an open tab */
+    hasActiveConnection(folder: Folder): boolean {
+        return folder.profiles.some(p => this.isActiveConnection(p))
+            || folder.children.some(c => this.hasActiveConnection(c))
     }
 
     launchProfile(profile: PartialProfile<Profile>): void {
@@ -819,9 +319,13 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
         return profile.id && this.config.store.profileBlacklist.includes(profile.id)
     }
 
+    get activeCount(): number {
+        return this.sshProfiles.filter(p => this.isActiveConnection(p)).length
+    }
+
     getConnectionCountText(): string {
         const total = this.sshProfiles.length
-        const active = this.sshProfiles.filter(p => this.isActiveConnection(p)).length
+        const active = this.activeCount
 
         if (active === 0) {
             return `${total} connection${total !== 1 ? 's' : ''}`
@@ -848,18 +352,248 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
         }
     }
 
-    // Context Menu Methods
+    // Context menus
+
     onProfileContextMenu(event: MouseEvent, profile: PartialProfile<SSHProfile>): void {
+        this.contextMenuProfile = profile
+        this.openContextMenu(event, 'profile')
+    }
+
+    onFolderContextMenu(event: MouseEvent, folder: Folder): void {
+        this.contextMenuFolder = folder
+        this.openContextMenu(event, 'folder')
+    }
+
+    /** Right-click on the empty area below the tree */
+    onListContextMenu(event: MouseEvent): void {
+        this.openContextMenu(event, 'root')
+    }
+
+    private openContextMenu(event: MouseEvent, kind: 'profile' | 'folder' | 'root'): void {
         event.preventDefault()
         event.stopPropagation()
 
-        this.contextMenuProfile = profile
+        this.contextMenuKind = kind
         this.contextMenuPosition = {
             x: event.clientX,
             y: event.clientY,
         }
         this.contextMenuVisible = true
+
+        // Once rendered, pull the menu back inside the window if it would
+        // spill past the right or bottom edge.
+        setTimeout(() => {
+            const menu = this.contextMenuElement?.nativeElement
+            if (!menu) {
+                return
+            }
+            const rect = menu.getBoundingClientRect()
+            this.contextMenuPosition = {
+                x: Math.max(0, Math.min(this.contextMenuPosition.x, window.innerWidth - rect.width - 4)),
+                y: Math.max(0, Math.min(this.contextMenuPosition.y, window.innerHeight - rect.height - 4)),
+            }
+        })
     }
+
+    // Folder actions
+
+    /** New connection, in `folder` when given (from its context menu) */
+    async newConnection(folder?: Folder): Promise<void> {
+        this.contextMenuVisible = false
+        const groupId = folder && (folder.kind === 'group' || folder.kind === 'unknown') ? folder.id : ''
+        const created = await this.actions.newConnection(groupId)
+        if (created) {
+            await this.afterChange(created.group || UNGROUPED_ID)
+        }
+    }
+
+    /** New folder, inside `parent` when it is a real group, else at the top level */
+    async newFolder(parent?: Folder): Promise<void> {
+        this.contextMenuVisible = false
+        const parentId = parent?.kind === 'group' ? parent.id : undefined
+        if (await this.actions.newFolder(parentId)) {
+            await this.afterChange(parentId)
+        }
+    }
+
+    async renameFolder(folder: Folder): Promise<void> {
+        this.contextMenuVisible = false
+        if (await this.actions.renameFolder(folder.id)) {
+            await this.refreshProfiles()
+        }
+    }
+
+    async editFolder(folder: Folder): Promise<void> {
+        this.contextMenuVisible = false
+        if (await this.actions.editFolder(folder.id)) {
+            await this.refreshProfiles()
+        }
+    }
+
+    async deleteFolder(folder: Folder): Promise<void> {
+        this.contextMenuVisible = false
+        if (await this.actions.deleteFolder(folder.id)) {
+            await this.refreshProfiles()
+        }
+    }
+
+    /** Opens a tab for every connection in the folder and its subfolders */
+    async openAllConnections(folder: Folder): Promise<void> {
+        this.contextMenuVisible = false
+
+        const profiles = collectProfiles(folder)
+        if (profiles.length > 5) {
+            const result = await this.platform.showMessageBox({
+                type: 'warning',
+                message: `Open ${profiles.length} connections from "${folder.name}"?`,
+                buttons: ['Open All', 'Cancel'],
+                defaultId: 0,
+                cancelId: 1,
+            })
+            if (result.response !== 0) {
+                return
+            }
+        }
+        for (const profile of profiles) {
+            this.launchProfile(profile)
+        }
+    }
+
+    /** Expands or collapses the given folders and everything below them */
+    setFoldersCollapsed(folders: Folder[], collapsed: boolean): void {
+        this.contextMenuVisible = false
+
+        const changes: Record<string, boolean> = {}
+        const visit = (f: Folder): void => {
+            f.collapsed = collapsed
+            changes[f.id] = collapsed
+            f.children.forEach(visit)
+        }
+        folders.forEach(visit)
+        saveCollapsedState(changes)
+        this.rebuildRows()
+    }
+
+    /**
+     * Refreshes after a change, first opening `revealId` (a folder id) and
+     * every folder above it so whatever just landed there is in view.
+     */
+    private async afterChange(revealId?: string): Promise<void> {
+        if (revealId) {
+            const changes: Record<string, boolean> = {}
+            for (const id of getPathIds(revealId, this.actions.groups)) {
+                changes[id] = false
+            }
+            saveCollapsedState(changes)
+        }
+        await this.refreshProfiles()
+    }
+
+    // Drag and drop
+    //
+    // Profiles can be dropped on any folder, or on a profile row (meaning the
+    // folder it is listed in). Folders can be dropped on another group, or on
+    // Ungrouped or the empty area of the list to move them to the top level.
+    // See canDrop() for the rules.
+
+    onDragStart(event: DragEvent, item: DragItem): void {
+        if (item.folder && item.folder.kind !== 'group') {
+            event.preventDefault()
+            return
+        }
+        event.stopPropagation()
+        this.contextMenuVisible = false
+        this.dragItem = item
+        if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move'
+            event.dataTransfer.setData('text/plain', (item.profile ?? item.folder)!.name)
+        }
+    }
+
+    onDragOver(event: DragEvent, target: Folder | null | undefined): void {
+        if (!this.dragItem || target === undefined) {
+            return
+        }
+        event.stopPropagation()
+        if (!this.canDropOn(this.dragItem, target)) {
+            this.setDropTarget(null)
+            return
+        }
+        event.preventDefault()
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = 'move'
+        }
+        this.setDropTarget(target ?? 'root')
+    }
+
+    onListDragLeave(event: DragEvent): void {
+        const list = event.currentTarget as HTMLElement
+        if (!list.contains(event.relatedTarget as Node)) {
+            this.setDropTarget(null)
+        }
+    }
+
+    async onDrop(event: DragEvent, target: Folder | null | undefined): Promise<void> {
+        const item = this.dragItem
+        this.onDragEnd()
+        if (!item || target === undefined || !this.canDropOn(item, target)) {
+            return
+        }
+        event.preventDefault()
+        event.stopPropagation()
+
+        if (item.profile) {
+            await this.dropProfile(item.profile, target)
+        } else if (item.folder) {
+            const parentId = target?.kind === 'group' ? target.id : undefined
+            await this.actions.moveFolder(item.folder.id, parentId)
+            await this.afterChange(parentId)
+        }
+    }
+
+    onDragEnd(): void {
+        this.dragItem = null
+        this.setDropTarget(null)
+    }
+
+    private canDropOn(item: DragItem, target: Folder | null): boolean {
+        return canDrop(item, target, this.actions.groups, p => this.isProfilePinned(p))
+    }
+
+    /**
+     * Highlights the drop target and, when it is a collapsed folder the
+     * pointer rests on, opens it after a moment so deeper folders can be reached.
+     */
+    private setDropTarget(target: Folder | 'root' | null): void {
+        if (target === this.dropTarget) {
+            return
+        }
+        this.dropTarget = target
+        clearTimeout(this.dragExpandTimer)
+        this.dragExpandTimer = null
+        if (target && target !== 'root' && target.collapsed && this.hasContents(target) && !this.filter) {
+            this.dragExpandTimer = setTimeout(() => {
+                if (this.dropTarget === target && target.collapsed) {
+                    this.toggleFolder(target)
+                }
+            }, 700)
+        }
+    }
+
+    /** Dropping on Favorites pins; dropping anywhere else unpins and moves */
+    private async dropProfile(profile: PartialProfile<SSHProfile>, target: Folder | null): Promise<void> {
+        if (target?.kind === 'favorites') {
+            this.setPinned(profile, true)
+            await this.refreshProfileGroups()
+            return
+        }
+        this.setPinned(profile, false)
+        const groupId = target && target.kind !== 'ungrouped' ? target.id : undefined
+        await this.actions.moveProfile(profile, groupId)
+        await this.afterChange(groupId ?? UNGROUPED_ID)
+    }
+
+    // Profile context menu
 
     contextMenuLaunch(): void {
         if (this.contextMenuProfile) {
@@ -869,166 +603,18 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
     }
 
     async contextMenuEdit(): Promise<void> {
-        if (!this.contextMenuProfile) {
-            this.contextMenuVisible = false
-            return
-        }
-
-        const profileToEdit = this.contextMenuProfile
-        const profileName = profileToEdit.name
-        const profileId = profileToEdit.id
-
-        try {
-            // Use Tabby's pattern for opening settings with profiles tab
-            const { SettingsTabComponent } = window['nodeRequire']('tabby-settings')
-
-            // Check if a settings tab is already open
-            const existingSettingsTab = this.app.tabs.find(tab => tab instanceof SettingsTabComponent)
-
-            if (existingSettingsTab) {
-                // Reuse existing settings tab
-                console.log('Reusing existing settings tab')
-                this.app.selectTab(existingSettingsTab)
-
-                // Switch to profiles tab if not already there
-                const settingsComponent = existingSettingsTab as any
-                if (settingsComponent.activeTab !== 'profiles') {
-                    settingsComponent.activeTab = 'profiles'
-                }
-            } else {
-                // Open new settings tab
-                console.log('Opening new settings tab')
-                this.app.openNewTabRaw({
-                    type: SettingsTabComponent,
-                    inputs: { activeTab: 'profiles' },
-                })
-            }
-
-            // Wait for the settings tab to render
-            await new Promise(resolve => setTimeout(resolve, 500))
-
-            // Try to find and click the profile element in the settings tab
-            // The ProfilesSettingsTab renders profiles as clickable list items
-            // Structure: .list-group-item.ps-5 (profile item, has padding-start: 5)
-            //   - Click on the main element triggers editProfile()
-            //   - DO NOT click on the .fa-play button (that launches the profile)
-            let clicked = false
-
-            // Try multiple times with increasing delays to handle async rendering
-            for (let attempt = 0; attempt < 5 && !clicked; attempt++) {
-                if (attempt > 0) {
-                    await new Promise(resolve => setTimeout(resolve, 200))
-                }
-
-                // Find profile list items - they have .ps-5 class (padding-start: 5rem)
-                // This distinguishes them from group headers
-                const profileElements = document.querySelectorAll('.list-group-item.ps-5')
-
-                for (const element of Array.from(profileElements)) {
-                    const textContent = element.textContent || ''
-
-                    // Check if this element contains our profile name
-                    if (textContent.includes(profileName)) {
-                        console.log(`Found profile element for "${profileName}", attempting click...`)
-
-                        // Make sure we're clicking on the main element, not a button
-                        // The template structure has the profile name in a .no-wrap div
-                        const nameElement = element.querySelector('.no-wrap')
-
-                        if (nameElement && nameElement.textContent?.trim() === profileName) {
-                            console.log(`Exact match found, clicking on profile name element...`)
-
-                            try {
-                                // Click on the name element (guaranteed to trigger editProfile)
-                                const clickable = nameElement as HTMLElement
-                                clickable.click()
-                                console.log(`Clicked profile name for "${profileName}"`)
-                                clicked = true
-                                break
-                            } catch (err) {
-                                console.debug('Error clicking name element, trying main element:', err)
-
-                                // Fallback: click on the main list item
-                                try {
-                                    (element as HTMLElement).click()
-                                    console.log(`Clicked main element for "${profileName}"`)
-                                    clicked = true
-                                    break
-                                } catch (err2) {
-                                    console.debug('Error clicking main element:', err2)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (clicked) {
-                console.log('Successfully triggered profile edit by simulating click')
-            } else {
-                console.warn('Could not find profile element to click')
-                console.info(`Please manually click on "${profileName}" in the profiles list to edit it`)
-            }
-        } catch (error) {
-            console.error('Failed to open settings or trigger edit:', error)
-        }
-
         this.contextMenuVisible = false
+        if (this.contextMenuProfile && await this.actions.editProfile(this.contextMenuProfile)) {
+            await this.refreshProfiles()
+        }
     }
 
     async contextMenuDuplicate(): Promise<void> {
-        if (!this.contextMenuProfile) {
-            this.contextMenuVisible = false
-            return
-        }
-
-        const baseProfile: PartialProfile<Profile> = deepClone(this.contextMenuProfile)
-        delete baseProfile.id
-        baseProfile.name = this.translate.instant('{name} copy', this.contextMenuProfile)
-        baseProfile.isBuiltin = false
-        baseProfile.isTemplate = false
-
-        this.config.store.profiles = this.config.store.profiles || []
-
-        // Hand off to Tabby so the copy gets a real id. Tabby matches profiles by
-        // `id` almost everywhere, so a profile without one is not just cosmetically
-        // odd -- it is invisible to the profile selector, and any id-based lookup
-        // matches *every* id-less profile at once. Duplicating used to push a
-        // stripped clone straight into the config, which is exactly how that
-        // happened. newProfile() assigns `${type}:custom:${slug}:${uuid}` and
-        // pushes the profile itself, so it must not be pushed again here.
-        const profiles = this.profiles as any
-        if (typeof profiles.newProfile === 'function') {
-            await profiles.newProfile(baseProfile)
-        } else {
-            // Older Tabby (the 1.0.197 typings this builds against have no
-            // newProfile) -- mint an id in the same format rather than leaving
-            // the profile without one.
-            baseProfile.id = this.generateProfileId(baseProfile)
-            this.config.store.profiles.push(baseProfile)
-        }
-
-        await this.config.save()
-
-        // Refresh the profile list
-        await this.refreshProfiles()
-
         this.contextMenuVisible = false
-    }
-
-    /**
-     * Builds an id in the same shape Tabby's own `newProfile()` uses, for the
-     * fallback path on Tabby versions that don't expose it.
-     */
-    private generateProfileId(profile: PartialProfile<Profile>): string {
-        const slug = (profile.name ?? 'profile')
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/^-+|-+$/g, '') || 'profile'
-        const uuid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-            ? crypto.randomUUID()
-            : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`
-        return `${profile.type}:custom:${slug}:${uuid}`
+        if (this.contextMenuProfile) {
+            await this.actions.duplicateProfile(this.contextMenuProfile)
+            await this.refreshProfiles()
+        }
     }
 
     contextMenuCopySSHCommand(): void {
@@ -1070,79 +656,40 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
     }
 
     async contextMenuDelete(): Promise<void> {
-        if (!this.contextMenuProfile || this.contextMenuProfile.isBuiltin) {
-            this.contextMenuVisible = false
-            return
-        }
-
-        const result = await this.platform.showMessageBox({
-            type: 'warning',
-            message: this.translate.instant('Delete "{name}"?', this.contextMenuProfile),
-            buttons: [
-                this.translate.instant('Delete'),
-                this.translate.instant('Cancel'),
-            ],
-            defaultId: 1,
-            cancelId: 1,
-        })
-
-        if (result.response === 0) {
-            // Remove by object identity, not by id. Filtering on `p.id !== target.id`
-            // deletes every profile sharing that id -- and `undefined === undefined`,
-            // so with any id-less profiles in the config (0.4.0 and earlier created
-            // them when duplicating) deleting one wiped out all of them. Identity
-            // removes exactly the profile the user right-clicked, and still cleans up
-            // the id-less profiles an older version may already have written.
-            const target = this.contextMenuProfile
-            const index = this.config.store.profiles.indexOf(target)
-            if (index !== -1) {
-                this.config.store.profiles.splice(index, 1)
-            } else if (target.id) {
-                // Not the same object (e.g. re-read from config) -- fall back to id,
-                // which is safe as long as the profile actually has one.
-                this.config.store.profiles = this.config.store.profiles.filter(p => p.id !== target.id)
-            }
-            await this.config.save()
-
-            // Refresh the profile list
+        this.contextMenuVisible = false
+        if (this.contextMenuProfile && await this.actions.deleteProfile(this.contextMenuProfile)) {
             await this.refreshProfiles()
         }
-
-        this.contextMenuVisible = false
     }
 
     async contextMenuPin(): Promise<void> {
-        if (!this.contextMenuProfile || !this.contextMenuProfile.id) {
-            this.contextMenuVisible = false
-            return
-        }
-
-        // Add to pinned profiles
-        if (!this.pinnedProfiles.includes(this.contextMenuProfile.id)) {
-            this.pinnedProfiles.push(this.contextMenuProfile.id)
-            this.savePinnedProfiles()
+        this.contextMenuVisible = false
+        if (this.contextMenuProfile?.id) {
+            this.setPinned(this.contextMenuProfile, true)
             await this.refreshProfileGroups()
         }
-
-        this.contextMenuVisible = false
     }
 
     async contextMenuUnpin(): Promise<void> {
-        if (!this.contextMenuProfile || !this.contextMenuProfile.id) {
-            this.contextMenuVisible = false
-            return
-        }
-
-        // Remove from pinned profiles
-        this.pinnedProfiles = this.pinnedProfiles.filter(id => id !== this.contextMenuProfile!.id)
-        this.savePinnedProfiles()
-        await this.refreshProfileGroups()
-
         this.contextMenuVisible = false
+        if (this.contextMenuProfile?.id) {
+            this.setPinned(this.contextMenuProfile, false)
+            await this.refreshProfileGroups()
+        }
     }
 
     isProfilePinned(profile: PartialProfile<SSHProfile>): boolean {
         return profile.id ? this.pinnedProfiles.includes(profile.id) : false
+    }
+
+    private setPinned(profile: PartialProfile<SSHProfile>, pinned: boolean): void {
+        if (!profile.id || this.isProfilePinned(profile) === pinned) {
+            return
+        }
+        this.pinnedProfiles = pinned
+            ? [...this.pinnedProfiles, profile.id]
+            : this.pinnedProfiles.filter(id => id !== profile.id)
+        this.savePinnedProfiles()
     }
 
     private savePinnedProfiles(): void {
@@ -1158,11 +705,5 @@ export class SSHSidebarComponent extends BaseComponent implements OnInit, OnDest
     private loadPinnedProfiles(): void {
         const pluginConfig = this.config.store.pluginConfig?.['ssh-sidebar'] || {}
         this.pinnedProfiles = pluginConfig.pinnedProfiles || []
-    }
-
-    private saveProfileGroupCollapse(group: ProfileGroup): void {
-        const profileGroupCollapsed = JSON.parse(window.localStorage.profileGroupCollapsed ?? '{}')
-        profileGroupCollapsed[group.id] = group.collapsed
-        window.localStorage.profileGroupCollapsed = JSON.stringify(profileGroupCollapsed)
     }
 }

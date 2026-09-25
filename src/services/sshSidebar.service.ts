@@ -17,7 +17,14 @@ export class SSHSidebarService {
     private sidebarElement: HTMLElement | null = null
     private styleElement: HTMLStyleElement | null = null
     private isVisible = false
-    private readonly SIDEBAR_WIDTH = 280
+    private readonly DEFAULT_WIDTH = 280
+    private readonly MIN_WIDTH = 200
+    private readonly MAX_WIDTH = 600
+    /** Room always left for the terminal, however wide the sidebar is dragged */
+    private readonly MIN_CONTENT_WIDTH = 300
+    private readonly WIDTH_STORAGE_KEY = 'sshSidebarWidth'
+    private width = this.loadWidth()
+    private stopResize: (() => void) | null = null
 
     constructor(
         private componentFactoryResolver: ComponentFactoryResolver,
@@ -106,24 +113,25 @@ export class SSHSidebarService {
         const wrapper = document.createElement('div')
         wrapper.className = 'ssh-sidebar-wrapper'
         wrapper.style.cssText = `
-            width: ${this.SIDEBAR_WIDTH}px;
-            flex: 0 0 ${this.SIDEBAR_WIDTH}px;
+            position: relative;
             min-width: 0;
             height: 100%;
             overflow: hidden;
             display: flex;
             flex-direction: column;
             background: var(--bs-body-bg, #1e1e1e);
-            border-right: 1px solid var(--bs-border-color, #333);
+            border-right: 1px solid color-mix(in srgb, var(--bs-body-color, #888) 18%, var(--bs-body-bg, #1e1e1e));
             z-index: 10;
         `
 
         wrapper.appendChild(domElem)
+        wrapper.appendChild(this.createResizeHandle())
 
         // Insert as the first child of the row container (left of profile-tree/content)
         container.insertBefore(wrapper, container.firstChild)
 
         this.sidebarElement = wrapper
+        this.applyWidth(this.width)
 
         this.injectLayoutCSS()
 
@@ -135,6 +143,7 @@ export class SSHSidebarService {
     }
 
     private destroySidebar(): void {
+        this.stopResize?.()
         this.removeLayoutCSS()
 
         if (this.sidebarComponentRef) {
@@ -147,6 +156,76 @@ export class SSHSidebarService {
             this.sidebarElement.remove()
             this.sidebarElement = null
         }
+    }
+
+    /**
+     * The drag handle on the sidebar's right edge. Dragging resizes the
+     * sidebar (the terminal takes whatever is left), double-clicking
+     * restores the default width. The width is kept in localStorage rather
+     * than the config so dragging doesn't write config.yaml on every change.
+     */
+    private createResizeHandle(): HTMLElement {
+        const handle = document.createElement('div')
+        handle.className = 'ssh-sidebar-resize-handle'
+        handle.title = 'Drag to resize, double-click to reset'
+
+        handle.addEventListener('dblclick', () => {
+            this.applyWidth(this.DEFAULT_WIDTH)
+            this.saveWidth()
+        })
+
+        handle.addEventListener('mousedown', (event: MouseEvent) => {
+            if (event.button !== 0) {
+                return
+            }
+            event.preventDefault()
+
+            const startX = event.clientX
+            const startWidth = this.width
+            let frame = 0
+
+            const onMove = (e: MouseEvent) => {
+                cancelAnimationFrame(frame)
+                frame = requestAnimationFrame(() => this.applyWidth(startWidth + e.clientX - startX))
+            }
+            const stop = () => {
+                cancelAnimationFrame(frame)
+                document.removeEventListener('mousemove', onMove)
+                document.removeEventListener('mouseup', stop)
+                document.body.classList.remove('ssh-sidebar-resizing')
+                handle.classList.remove('active')
+                this.stopResize = null
+                this.saveWidth()
+            }
+
+            document.addEventListener('mousemove', onMove)
+            document.addEventListener('mouseup', stop)
+            // Keeps the resize cursor, and stops text selection, while the
+            // pointer is over the terminal rather than the handle
+            document.body.classList.add('ssh-sidebar-resizing')
+            handle.classList.add('active')
+            this.stopResize = stop
+        })
+
+        return handle
+    }
+
+    private applyWidth(width: number): void {
+        const max = Math.min(this.MAX_WIDTH, window.innerWidth - this.MIN_CONTENT_WIDTH)
+        this.width = Math.round(Math.max(this.MIN_WIDTH, Math.min(width, max)))
+        if (this.sidebarElement) {
+            this.sidebarElement.style.width = `${this.width}px`
+            this.sidebarElement.style.flex = `0 0 ${this.width}px`
+        }
+    }
+
+    private loadWidth(): number {
+        const stored = parseInt(window.localStorage[this.WIDTH_STORAGE_KEY] ?? '', 10)
+        return Number.isFinite(stored) ? stored : this.DEFAULT_WIDTH
+    }
+
+    private saveWidth(): void {
+        window.localStorage[this.WIDTH_STORAGE_KEY] = String(this.width)
     }
 
     /**
@@ -176,6 +255,28 @@ export class SSHSidebarService {
                 flex: 1 1 0 !important;
                 width: auto !important;
                 min-width: 0 !important;
+            }
+
+            .ssh-sidebar-resize-handle {
+                position: absolute;
+                top: 0;
+                right: 0;
+                width: 5px;
+                height: 100%;
+                cursor: col-resize;
+                z-index: 20;
+                transition: background 0.15s ease;
+            }
+
+            .ssh-sidebar-resize-handle:hover,
+            .ssh-sidebar-resize-handle.active {
+                background: var(--bs-primary, #3b82f6);
+            }
+
+            body.ssh-sidebar-resizing,
+            body.ssh-sidebar-resizing * {
+                cursor: col-resize !important;
+                user-select: none !important;
             }
         `
 
